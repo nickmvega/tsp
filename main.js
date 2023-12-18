@@ -1,364 +1,305 @@
 import * as THREE from 'https://cdn.jsdelivr.net/npm/three@latest/build/three.module.js';
 import { OrbitControls } from 'https://cdn.skypack.dev/three@0.133.1/examples/jsm/controls/OrbitControls.js';
 
-// Fragment Shader
-const fragmentShader = `
-    uniform sampler2D u_map_tex;
+const canvasContainer = document.querySelector('#canvasContainer');
 
-    varying float vOpacity;
-    varying vec2 vUv;
-
-    void main() {
-        vec3 color = texture2D(u_map_tex, vUv).rgb;
-        color -= .2 * length(gl_PointCoord.xy - vec2(.5));
-        float dot = 1. - smoothstep(.38, .4, length(gl_PointCoord.xy - vec2(.5)));
-        if (dot < 0.5) discard;
-        gl_FragColor = vec4(color, dot * vOpacity);
-    }
-`;
-
-// Vertex Shader
 const vertexShader = `
-    uniform sampler2D u_map_tex;
-    uniform float u_dot_size;
-    uniform float u_time_since_click;
-    uniform vec3 u_pointer;
-
-    #define PI 3.14159265359
-
-    varying float vOpacity;
-    varying vec2 vUv;
+    varying vec2 vertexUV;
+    varying vec3 vertexNormal;
 
     void main() {
-        vUv = uv;
-
-        // mask with world map
-        float visibility = step(.2, texture2D(u_map_tex, uv).r);
-        gl_PointSize = visibility * u_dot_size;
-
-        // make back dots semi-transparent
-        vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
-        vOpacity = (1. / length(mvPosition.xyz) - .7);
-        vOpacity = clamp(vOpacity, .03, 1.);
-
-        // add ripple
-        float t = u_time_since_click - .1;
-        t = max(0., t);
-        float max_amp = .15;
-        float dist = 1. - .5 * length(position - u_pointer); // 0 .. 1
-        float damping = 1. / (1. + 20. * t); // 1 .. 0
-        float delta = max_amp * damping * sin(5. * t * (1. + 2. * dist) - PI);
-        delta *= 1. - smoothstep(.8, 1., dist);
-        vec3 pos = position;
-        pos *= (1. + delta);
-
-        gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.);
+        vertexUV = uv;
+        vertexNormal = normalize(normalMatrix * normal);
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
     }
 `;
 
-// Initialization and setup
-const containerEl = document.querySelector(".globe-wrapper");
-const canvas3D = containerEl.querySelector("#globe-3d");
-const canvas2D = containerEl.querySelector("#globe-2d-overlay");
-const popupEl = containerEl.querySelector(".globe-popup");
+const fragmentShader = `
+    uniform sampler2D globeTexture;
+    varying vec2 vertexUV; 
+    varying vec3 vertexNormal;
 
-let renderer, scene, camera, rayCaster, controls, group;
-let overlayCtx = canvas2D.getContext("2d");
-let coordinates2D = [0, 0];
-let pointerPos;
-let clock, mouse, pointer, globe, globeMesh;
-let popupVisible;
-let earthTexture, mapMaterial;
-let popupOpenTl, popupCloseTl;
+    void main() {
+        float intensity = 1.05 - dot(
+            vertexNormal, vec3(0.0, 0.0, 1.0));
+        vec3 atmosphere = vec3(0.3, 0.6, 1.0) *
+            pow(intensity, 1.5);
+    
+        gl_FragColor = vec4(atmosphere + 
+            texture2D(globeTexture, vertexUV).xyz, 1.0);
+    }
+`;
 
-let dragged = false;
+//scene
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(
+    75,
+    canvasContainer.offsetWidth / canvasContainer.offsetHeight,
+    0.1,
+    1000
+);
 
-initScene();
-window.addEventListener("resize", updateSize);
+//render
+const renderer = new THREE.WebGLRenderer(
+    {
+        antialias: true,
+        canvas: document.querySelector('canvas')
+});
+renderer.setSize(canvasContainer.offsetWidth, canvasContainer.offsetHeight);
+renderer.setPixelRatio(window.devicePixelRatio)
 
-// Function definitions
-function initScene() {
-    renderer = new THREE.WebGLRenderer({canvas: canvas3D, alpha: true});
-	renderer.setPixelRatio(2);
-
-    scene = new THREE.Scene();
-    camera = new THREE.OrthographicCamera(-1.1, 1.1, 1.1, -1.1, 0, 3);
-    camera.position.z = 1.1;
-
-    rayCaster = new THREE.Raycaster();
-    rayCaster.far = 1.15;
-    mouse = new THREE.Vector2(-1, -1);
-    clock = new THREE.Clock();
-
-    createOrbitControls();
-
-    popupVisible = false;
-
-    new THREE.TextureLoader().load(
-        "https://ksenia-k.com/img/earth-map-colored.png",
-        (mapTex) => {
-            earthTexture = mapTex;
-            earthTexture.repeat.set(1, 1);
-            createGlobe();
-            createPointer();
-            createPopupTimelines();
-            addCanvasEvents();
-            updateSize();
-            render();
-        });
-}
-
-function createOrbitControls() {
-    controls = new OrbitControls(camera, canvas3D);
-    controls.enablePan = false;
-    controls.enableZoom = false;
-    controls.enableDamping = true;
-    controls.minPolarAngle = .4 * Math.PI;
-    controls.maxPolarAngle = .4 * Math.PI;
-    controls.autoRotate = true;
-
-    let timestamp;
-    controls.addEventListener("start", () => {
-        timestamp = Date.now();
-    });
-    controls.addEventListener("end", () => {
-        dragged = (Date.now() - timestamp) > 600;
-    });
-}
-
-function createGlobe() {
-    const globeGeometry = new THREE.IcosahedronGeometry(1, 22);
-    mapMaterial = new THREE.ShaderMaterial({
+//sphere
+const sphere = new THREE.Mesh(
+    new THREE.SphereGeometry(5, 50, 50),
+    new THREE.ShaderMaterial({
         vertexShader: vertexShader,
         fragmentShader: fragmentShader,
         uniforms: {
-            u_map_tex: {type: "t", value: earthTexture},
-            u_dot_size: {type: "f", value: 0},
-            u_pointer: {type: "v3", value: new THREE.Vector3(.0, .0, 1.)},
-            u_time_since_click: {value: 0},
-        },
-        alphaTest: false,
-        transparent: true
-    });
-
-    globe = new THREE.Points(globeGeometry, mapMaterial);
-    scene.add(globe);
-
-    globeMesh = new THREE.Mesh(globeGeometry, new THREE.MeshBasicMaterial({
-        color: 0x222222,
-        transparent: true,
-        opacity: .05
-    }));
-    scene.add(globeMesh);
-}
-
-
-function createPointer() {
-    const geometry = new THREE.SphereGeometry(.04, 16, 16);
-    const material = new THREE.MeshBasicMaterial({
-        color: 0x00000,
-        transparent: true,
-        opacity: 0
-    });
-    pointer = new THREE.Mesh(geometry, material);
-    scene.add(pointer);
-}
-
-
-function updateOverlayGraphic() {
-    let activePointPosition = pointer.position.clone();
-    activePointPosition.applyMatrix4(globe.matrixWorld);
-    const activePointPositionProjected = activePointPosition.clone();
-    activePointPositionProjected.project(camera);
-    coordinates2D[0] = (activePointPositionProjected.x + 1) * containerEl.offsetWidth * .5;
-    coordinates2D[1] = (1 - activePointPositionProjected.y) * containerEl.offsetHeight * .5;
-
-    const matrixWorldInverse = controls.object.matrixWorldInverse;
-    activePointPosition.applyMatrix4(matrixWorldInverse);
-
-    if (activePointPosition.z > -1) {
-        if (popupVisible === false) {
-            popupVisible = true;
-            showPopupAnimation(false);
-        }
-
-        let popupX = coordinates2D[0];
-        popupX -= (activePointPositionProjected.x * containerEl.offsetWidth * .3);
-
-        let popupY = coordinates2D[1];
-        const upDown = (activePointPositionProjected.y > .6);
-        popupY += (upDown ? 20 : -20);
-
-        gsap.set(popupEl, {
-            x: popupX,
-            y: popupY,
-            xPercent: -35,
-            yPercent: upDown ? 0 : -100
-        });
-
-        popupY += (upDown ? -5 : 5);
-        const curveMidX = popupX + activePointPositionProjected.x * 100;
-        const curveMidY = popupY + (upDown ? -.5 : .1) * coordinates2D[1];
-
-        drawPopupConnector(coordinates2D[0], coordinates2D[1], curveMidX, curveMidY, popupX, popupY);
-
-    } else {
-        if (popupVisible) {
-            popupOpenTl.pause(0);
-            popupCloseTl.play(0);
-        }
-        popupVisible = false;
-    }
-}
-
-function addCanvasEvents() {
-    containerEl.addEventListener("mousemove", (e) => {
-        updateMousePosition(e.clientX, e.clientY);
-    });
-
-    containerEl.addEventListener("click", (e) => {
-        if (!dragged) {
-            updateMousePosition(
-                e.targetTouches ? e.targetTouches[0].pageX : e.clientX,
-                e.targetTouches ? e.targetTouches[0].pageY : e.clientY,
-            );
-
-            const res = checkIntersects();
-            if (res.length) {
-                pointerPos = res[0].face.normal.clone();
-                pointer.position.set(res[0].face.normal.x, res[0].face.normal.y, res[0].face.normal.z);
-                mapMaterial.uniforms.u_pointer.value = res[0].face.normal;
-                popupEl.innerHTML = cartesianToLatLong();
-                showPopupAnimation(true);
-                clock.start()
+            globeTexture: {
+                value: new THREE.TextureLoader().load('./image/globe.jpeg')
             }
         }
-    });
+    })
+);
 
-    function updateMousePosition(eX, eY) {
-        mouse.x = (eX - containerEl.offsetLeft) / containerEl.offsetWidth * 2 - 1;
-        mouse.y = -((eY - containerEl.offsetTop) / containerEl.offsetHeight) * 2 + 1;
+scene.add(sphere);
+
+let controls;
+
+
+//cities
+const cities = [
+    // Chicago, USA
+    { name: "Chicago", country: "USA", lat: 41.8781, lon: -87.6298 },
+
+    // Top Cities in the World
+    { name: "Bangkok", country: "Thailand", lat: 13.7563, lon: 100.5018 },
+    { name: "London", country: "United Kingdom", lat: 51.5074, lon: -0.1278 },
+    { name: "Paris", country: "France", lat: 48.8566, lon: 2.3522 },
+    { name: "Dubai", country: "United Arab Emirates", lat: 25.276987, lon: 55.296249 },
+    { name: "Singapore", country: "Singapore", lat: 1.3521, lon: 103.8198 },
+    { name: "New York City", country: "USA", lat: 40.7128, lon: -74.0060 },
+    { name: "Kuala Lumpur", country: "Malaysia", lat: 3.1390, lon: 101.6869 },
+    { name: "Istanbul", country: "Turkey", lat: 41.0082, lon: 28.9784 },
+    { name: "Tokyo", country: "Japan", lat: 35.6895, lon: 139.6917 },
+    { name: "Antalya", country: "Turkey", lat: 36.8969, lon: 30.7133 },
+    { name: "Seoul", country: "South Korea", lat: 37.5665, lon: 126.9780 },
+    { name: "Hong Kong", country: "China", lat: 22.3193, lon: 114.1694 },
+    { name: "Barcelona", country: "Spain", lat: 41.3851, lon: 2.1734 },
+    { name: "Amsterdam", country: "Netherlands", lat: 52.3676, lon: 4.9041 },
+    { name: "Milan", country: "Italy", lat: 45.4642, lon: 9.1900 },
+    { name: "Taipei", country: "Taiwan", lat: 25.032969, lon: 121.565418 },
+    { name: "Rome", country: "Italy", lat: 41.9028, lon: 12.4964 },
+    { name: "Osaka", country: "Japan", lat: 34.6937, lon: 135.5023 },
+    { name: "Vienna", country: "Austria", lat: 48.2082, lon: 16.3738 },
+    { name: "Shanghai", country: "China", lat: 31.2304, lon: 121.4737 },
+    { name: "Prague", country: "Czech Republic", lat: 50.0755, lon: 14.4378 },
+    { name: "Los Angeles", country: "USA", lat: 34.0522, lon: -118.2437 },
+    { name: "Madrid", country: "Spain", lat: 40.4168, lon: -3.7038 },
+    { name: "Dublin", country: "Ireland", lat: 53.3498, lon: -6.2603 },
+    { name: "Venice", country: "Italy", lat: 45.4408, lon: 12.3155 },
+    { name: "Miami", country: "USA", lat: 25.7617, lon: -80.1918 },
+    { name: "Berlin", country: "Germany", lat: 52.5200, lon: 13.4050 },
+    { name: "Sydney", country: "Australia", lat: -33.8688, lon: 151.2093 },
+    { name: "Lisbon", country: "Portugal", lat: 38.7223, lon: -9.1393 },
+
+    // South America
+    { name: "Buenos Aires", country: "Argentina", lat: -34.6037, lon: -58.3816 },
+    { name: "Rio de Janeiro", country: "Brazil", lat: -22.9068, lon: -43.1729 },
+    { name: "São Paulo", country: "Brazil", lat: -23.5505, lon: -46.6333 },
+    { name: "Lima", country: "Peru", lat: -12.0464, lon: -77.0428 },
+    { name: "Bogotá", country: "Colombia", lat: 4.7110, lon: -74.0721 },
+    { name: "Santiago", country: "Chile", lat: -33.4489, lon: -70.6693 },
+    { name: "Quito", country: "Ecuador", lat: -0.1807, lon: -78.4678 },
+    { name: "Caracas", country: "Venezuela", lat: 10.4806, lon: -66.9036 },
+    { name: "Montevideo", country: "Uruguay", lat: -34.9011, lon: -56.1645 },
+    { name: "Asunción", country: "Paraguay", lat: -25.2637, lon: -57.5759 },
+    
+    // Central America
+    { name: "Panama City", country: "Panama", lat: 8.9824, lon: -79.5199 },
+    { name: "San José", country: "Costa Rica", lat: 9.9281, lon: -84.0907 },
+    { name: "Guatemala City", country: "Guatemala", lat: 14.6349, lon: -90.5069 },
+    { name: "Managua", country: "Nicaragua", lat: 12.1140, lon: -86.2362 },
+    { name: "Tegucigalpa", country: "Honduras", lat: 14.0723, lon: -87.1921 },
+    { name: "San Salvador", country: "El Salvador", lat: 13.6929, lon: -89.2182 },
+    { name: "Belize City", country: "Belize", lat: 17.5046, lon: -88.1962 },
+    { name: "San Pedro Sula", country: "Honduras", lat: 15.5000, lon: -88.0333 },
+    { name: "Leon", country: "Nicaragua", lat: 12.4379, lon: -86.8780 },
+    { name: "Antigua Guatemala", country: "Guatemala", lat: 14.5586, lon: -90.7295 },
+
+    // Africa
+    { name: "Cairo", country: "Egypt", lat: 30.0444, lon: 31.2357 },
+    { name: "Cape Town", country: "South Africa", lat: -33.9249, lon: 18.4241 },
+    { name: "Marrakech", country: "Morocco", lat: 31.6295, lon: -7.9811 },
+    { name: "Johannesburg", country: "South Africa", lat: -26.2041, lon: 28.0473 },
+    { name: "Nairobi", country: "Kenya", lat: -1.2921, lon: 36.8219 },
+    { name: "Lagos", country: "Nigeria", lat: 6.5244, lon: 3.3792 },
+    { name: "Addis Ababa", country: "Ethiopia", lat: 9.03, lon: 38.74 },
+    { name: "Dar es Salaam", country: "Tanzania", lat: -6.7924, lon: 39.2083 },
+    { name: "Kampala", country: "Uganda", lat: 0.3476, lon: 32.5825 },
+    { name: "Casablanca", country: "Morocco", lat: 33.5731, lon: -7.5898 },
+
+    // India
+    { name: "Mumbai", country: "India", lat: 19.0760, lon: 72.8777 },
+    { name: "New Delhi", country: "India", lat: 28.6139, lon: 77.2090 },
+    
+    // Russia
+    { name: "Moscow", country: "Russia", lat: 55.7558, lon: 37.6173 },
+    { name: "Saint Petersburg", country: "Russia", lat: 59.9343, lon: 30.3351 },
+    
+    // Norway
+    { name: "Oslo", country: "Norway", lat: 59.9139, lon: 10.7522 },
+
+    // Finland
+    { name: "Helsinki", country: "Finland", lat: 60.1699, lon: 24.9384 },
+ 
+    // Iceland
+    { name: "Reykjavik", country: "Iceland", lat: 64.1466, lon: -21.9426 },
+ 
+    // Greenland
+    { name: "Nuuk", country: "Greenland", lat: 64.1814, lon: -51.6941 },
+ 
+    // Hawaii (USA)
+    { name: "Honolulu", country: "USA", lat: 21.3069, lon: -157.8583 },
+ 
+    // Sri Lanka
+    { name: "Colombo", country: "Sri Lanka", lat: 6.9271, lon: 79.8612 },
+ 
+    // Senegal
+    { name: "Dakar", country: "Senegal", lat: 14.7167, lon: -17.4677 },
+ 
+    // Alaska (USA)
+    { name: "Anchorage", country: "USA", lat: 61.2181, lon: -149.9003 }
+];
+
+
+function latLongToVector3(lat, lon, radius) {
+    var phi = (90 - lat) * (Math.PI / 180);
+    var theta = (lon + 180) * (Math.PI / 180);
+
+    var x = -(radius * Math.sin(phi) * Math.cos(theta));
+    var y = radius * Math.cos(phi);
+    var z = radius * Math.sin(phi) * Math.sin(theta);
+
+    return new THREE.Vector3(x, y, z);
+}
+
+const globeRadius = 5; // Same as your sphere's radius
+const citySize = 0.05; // Adjust the size of the city marker
+
+cities.forEach(city => {
+    const position = latLongToVector3(city.lat, city.lon, globeRadius);
+
+    const cityGeometry = new THREE.SphereGeometry(citySize, 32, 32);
+    const cityMaterial = new THREE.MeshBasicMaterial({ color: 0xff0000 });
+    const cityMarker = new THREE.Mesh(cityGeometry, cityMaterial);
+
+    cityMarker.position.set(position.x, position.y, position.z);
+    sphere.add(cityMarker); // Add city marker as a child of the globe
+
+    cityMarker.userData = {
+        isCityMarker: true,
+        cityName: city.name,
+        country: city.country
+    };
+});
+
+
+//orbit controls
+function createOrbitControls() {
+    controls = new OrbitControls(camera, renderer.domElement);
+    controls.enablePan = false;
+    controls.enableZoom = false;
+    controls.enableDamping = true;
+    controls.dampingFactor = 0.05;
+    controls.minPolarAngle = 0;
+    controls.maxPolarAngle = Math.PI;
+}
+
+createOrbitControls();
+
+camera.position.z = 10;
+
+//star
+const starGeometry = new THREE.BufferGeometry()
+const starMaterial = new THREE.PointsMaterial({
+    color: 0xffffff,
+    size: 0.4
+})
+const starVertices = []
+for (let i = 0; i < 40000; i++) {
+    const x = (Math.random() - 0.5) * 3000
+    const y = (Math.random() - 0.5) * 3000
+    const z = (Math.random() - 0.5) * 3000;
+    starVertices.push(x, y, z)
+}
+
+starGeometry.setAttribute('position',
+    new THREE.Float32BufferAttribute(
+        starVertices, 3));
+
+const stars = new THREE.Points(starGeometry, starMaterial);
+scene.add(stars);
+
+const raycaster = new THREE.Raycaster();
+const mouse = new THREE.Vector2();
+let hoveredCityMarker = null;
+let isCityMarkerHighlighted = false;
+
+function onMouseMove(event) {
+    const bounds = renderer.domElement.getBoundingClientRect();
+    mouse.x = ((event.clientX - bounds.left) / bounds.width) * 2 - 1;
+    mouse.y = -((event.clientY - bounds.top) / bounds.height) * 2 + 1;
+
+    raycaster.setFromCamera(mouse, camera);
+
+    const intersects = raycaster.intersectObjects(scene.children, true);
+
+    if (hoveredCityMarker) {
+        if (!isCityMarkerHighlighted) {
+            hoveredCityMarker.material.color.set(0xff0000); // Red color for city markers
+        }
+    }
+
+    if (intersects.length > 0) {
+        const cityMarker = intersects[0].object;
+
+        if (cityMarker.material && cityMarker.material.isMaterial && cityMarker.material.color) {
+            if (!isCityMarkerHighlighted) {
+                cityMarker.material.color.set(0x00ff00); // Green color or any desired effect
+            }
+
+            hoveredCityMarker = cityMarker;
+        }
     }
 }
 
-function checkIntersects() {
-    rayCaster.setFromCamera(mouse, camera);
-    const intersects = rayCaster.intersectObject(globeMesh);
-    if (intersects.length) {
-        document.body.style.cursor = "pointer";
-    } else {
-        document.body.style.cursor = "auto";
+function onClick(event) {
+    if (hoveredCityMarker) {
+        // Toggle the highlight state of the city marker
+        isCityMarkerHighlighted = !isCityMarkerHighlighted;
+
+        if (isCityMarkerHighlighted) {
+            hoveredCityMarker.material.color.set(0x00ff00); // Green color
+        } else {
+            hoveredCityMarker.material.color.set(0xff0000); // Red color
+        }
     }
-    return intersects;
 }
 
-function render() {
-    mapMaterial.uniforms.u_time_since_click.value = clock.getElapsedTime();
-    checkIntersects();
-    if (pointer) {
-        updateOverlayGraphic();
-    }
-    controls.update();
+function animate() {
+    requestAnimationFrame(animate);
+
+    // Always rotate the Earth
+    sphere.rotation.y += 0.00085;
+
     renderer.render(scene, camera);
-    requestAnimationFrame(render);
+    controls.update();
 }
 
-function updateSize() {
-    const minSide = .65 * Math.min(window.innerWidth, window.innerHeight);
-    containerEl.style.width = minSide + "px";
-    containerEl.style.height = minSide + "px";
-    renderer.setSize(minSide, minSide);
-    canvas2D.width = canvas2D.height = minSide;
-    mapMaterial.uniforms.u_dot_size.value = .04 * minSide;
-}
+// Add event listeners
+renderer.domElement.addEventListener('mousemove', onMouseMove);
+renderer.domElement.addEventListener('mousedown', onClick);
 
 
-//  ---------------------------------------
-//  HELPERS
-
-// popup content
-function cartesianToLatLong() {
-    const pos = pointer.position;
-    const lat = 90 - Math.acos(pos.y) * 180 / Math.PI;
-    const lng = (270 + Math.atan2(pos.x, pos.z) * 180 / Math.PI) % 360 - 180;
-    return formatCoordinate(lat, 'N', 'S') + ",&nbsp;" + formatCoordinate(lng, 'E', 'W');
-}
-
-function formatCoordinate(coordinate, positiveDirection, negativeDirection) {
-    const direction = coordinate >= 0 ? positiveDirection : negativeDirection;
-    return `${Math.abs(coordinate).toFixed(4)}°&nbsp${direction}`;
-}
-
-
-// popup show / hide logic
-function createPopupTimelines() {
-    popupOpenTl = gsap.timeline({
-        paused: true
-    })
-        .to(pointer.material, {
-            duration: .2,
-            opacity: 1,
-        }, 0)
-        .fromTo(canvas2D, {
-            opacity: 0
-        }, {
-            duration: .3,
-            opacity: 1
-        }, .15)
-        .fromTo(popupEl, {
-            opacity: 0,
-            scale: .9,
-            transformOrigin: "center bottom"
-        }, {
-            duration: .1,
-            opacity: 1,
-            scale: 1,
-        }, .15 + .1);
-
-    popupCloseTl = gsap.timeline({
-        paused: true
-    })
-        .to(pointer.material, {
-            duration: .3,
-            opacity: .2,
-        }, 0)
-        .to(canvas2D, {
-            duration: .3,
-            opacity: 0
-        }, 0)
-        .to(popupEl, {
-            duration: 0.3,
-            opacity: 0,
-            scale: 0.9,
-            transformOrigin: "center bottom"
-        }, 0);
-}
-
-function showPopupAnimation(lifted) {
-    if (lifted) {
-        let positionLifted = pointer.position.clone();
-        positionLifted.multiplyScalar(1.3);
-        gsap.from(pointer.position, {
-            duration: .25,
-            x: positionLifted.x,
-            y: positionLifted.y,
-            z: positionLifted.z,
-            ease: "power3.out"
-        });
-    }
-    popupCloseTl.pause(0);
-    popupOpenTl.play(0);
-}
-
-
-// overlay (line between pointer and popup)
-function drawPopupConnector(startX, startY, midX, midY, endX, endY) {
-    overlayCtx.strokeStyle = "#000000";
-    overlayCtx.lineWidth = 3;
-    overlayCtx.lineCap = "round";
-    overlayCtx.clearRect(0, 0, containerEl.offsetWidth, containerEl.offsetHeight);
-    overlayCtx.beginPath();
-    overlayCtx.moveTo(startX, startY);
-    overlayCtx.quadraticCurveTo(midX, midY, endX, endY);
-    overlayCtx.stroke();
-}
+animate()
