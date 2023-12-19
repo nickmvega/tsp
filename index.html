@@ -3,6 +3,9 @@
 <head>
     <title>Three.js</title>
     <link href="/tailwind.css" rel="stylesheet">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Exo+2:ital,wght@1,600&display=swap" rel="stylesheet">
     <style>
         body { margin: 0; }
         #cityInfo {
@@ -13,16 +16,69 @@
             display: none;
             z-index: 10; /* Ensure it's above other elements */
         }
+        .font-exo {
+            font-family: 'Exo 2', sans-serif;
+        }
+
+        .form-container {
+            border: 3px solid;
+            border-image-slice: 1;
+            animation: rainbow-animation 5s ease infinite;
+            background-color: black;
+        }
+
+        @keyframes rainbow-animation {
+            0% { border-image-source: linear-gradient(to right, violet, indigo, blue, green, yellow, orange, red); }
+            100% { border-image-source: linear-gradient(to right, red, orange, yellow, green, blue, indigo, violet); }
+        }
     </style>
 </head>
 <body>
     <div id="cityInfo"></div>
     
-    <div class="flex h-screen bg-white">
-        <div class="w-1/4 flex flex-col justify-center px-8">
-            <h1 class="text-white">f</h1>
+    <div class="flex h-screen bg-black">
+        <div class="w-1/3 flex flex-col px-8 bg-black font-exo">
+            <h1 class="text-white text-5xl mb-8 mt-10">VISUALIZING THE TRAVELING SALESMAN PROBLEM</h1>
+            <p class="text-gray-500 mb-8">Follow these steps to simulate the shortest route:</p>
+
+
+            </p>
+            <div class="form-container my-4 p-4 rounded-lg">
+                <div class="my-4">
+                    <label class="text-white">Click or choose a Starting City:</label>
+                    <select id="citySelect">
+                        <option value="">Choose a starting city</option>
+                        <!-- Add city options here -->
+                    </select>
+                </div>
+                <div class="my-4">
+                    <label class="text-white">Number of Cities:</label>
+                    <input type="number" id="numCities" min="1" max="200">
+                </div>
+
+                <div class="my-4">
+                    <label class="text-white">Which cities:</label>
+                    <select id="chooseCity">
+                        <option value="">Pick which cities to visit</option>
+                    </select>
+
+                </div>
+
+                <div class="my-4">
+                    <label class="text-white">Algorithm:</label>
+                    <select id="algorithmSelect">
+                        <!-- Add algorithm options here -->
+                    </select>
+                </div>
+                
+                <div class="my-4">
+                    <button id="startButton" class="px-10 py-3 bg-green-500 text-white font-bold rounded hover:bg-green-600 transition duration-300">
+                        START
+                    </button>                
+                </div>
+            </div>
         </div>
-        <div class="w-3/4" id="canvasContainer">
+        <div class="w-2/3" id="canvasContainer">
             <canvas></canvas>
         </div>
 
