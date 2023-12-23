@@ -213,7 +213,6 @@ scene.add(stars);
 const raycaster = new THREE.Raycaster();
 const mouse = new THREE.Vector2();
 
-
 //CREATION OF CITY MARKERS
 const globeRadius = 5; // Same as your sphere's radius
 const citySize = 0.05; // Adjust the size of the city marker
@@ -249,8 +248,12 @@ function latLongToVector3(lat, lon, radius) {
 }
 
 
-//NAVBAR INTERACTIONS/GLOBE HANDLING
 function onMouseMove(event) {
+
+    if (currentStep !== 1 && currentStep !== 3) {
+        return;
+    }
+
     const bounds = renderer.domElement.getBoundingClientRect();
     mouse.x = ((event.clientX - bounds.left) / bounds.width) * 2 - 1;
     mouse.y = -((event.clientY - bounds.top) / bounds.height) * 2 + 1;
@@ -268,6 +271,15 @@ function onMouseMove(event) {
     if (intersects.length > 0) {
         const object = intersects[0].object;
 
+        // Skip interaction for starting city in Step 3
+        if (currentStep === 3 && object.userData.cityName === startingCityName) {
+            return;
+        }
+
+        if (currentStep === 1 && object.userData.cityName === startingCityName) {
+            return;
+        }
+
         if (object.userData && object.userData.isCityMarker) {
             if (object !== selectedCityMarker && object.material && object.material.isMaterial && object.material.color) {
                 object.material.color.set(0x800080); // Purple color for hovered city
@@ -282,7 +294,6 @@ function onMouseMove(event) {
 
 function onClick(event) {
     if (currentStep == 1) {
-    
         raycaster.setFromCamera(mouse, camera);
         const intersects = raycaster.intersectObjects(scene.children, true);
 
@@ -301,10 +312,7 @@ function onClick(event) {
                 selectedCityMarker = cityMarker;
                 selectedCityMarker.material.color.set(0x00ff00); // Green color for selected city
 
-                // Construct the city name and country string
                 const cityInfo = `${selectedCityMarker.userData.cityName}, ${selectedCityMarker.userData.country}`;
-
-                // Find the option in the select element that matches the cityInfo and select it
                 const selectElement = document.getElementById('citySelect');
                 for (let i = 0; i < selectElement.options.length; i++) {
                     if (selectElement.options[i].text === cityInfo) {
@@ -320,6 +328,13 @@ function onClick(event) {
     
         if (intersects.length > 0 && intersects[0].object.userData && intersects[0].object.userData.isCityMarker) {
             const cityMarker = intersects[0].object;
+    
+            // console.log("Clicked City Marker:", cityMarker.userData.cityName);
+            // console.log("Starting City:", startingCityName);
+            // Skip interaction for the starting city
+            if (cityMarker.userData.cityName === startingCityName) {
+                return;
+            }
     
             if (!selectedCities.includes(cityMarker.userData.cityName)) {
                 const dropdowns = document.querySelectorAll("#cityDropdowns select");
@@ -340,27 +355,9 @@ function onClick(event) {
                 }
             }
         }
-    }
-    return; 
+    }    
 }
 
-function highlightCityOnMap(selectedCity) {
-    // Deselect the previously selected city, if any
-    if (selectedCityMarker) {
-        selectedCityMarker.material.color.set(0xff0000); // Set to default color
-        selectedCityMarker = null;
-    }
-
-    // Find and highlight the new city marker
-    for (let i = 0; i < sphere.children.length; i++) {
-        const object = sphere.children[i];
-        if (object.userData && object.userData.isCityMarker && object.userData.cityName === selectedCity) {
-            object.material.color.set(0x00ff00); // Highlight color
-            selectedCityMarker = object;
-            break;
-        }
-    }
-}
 
 function updateDropdownOptions() {
     const dropdowns = document.querySelectorAll("#cityDropdowns select");
@@ -417,16 +414,32 @@ function updateStepVisibility() {
     }
 }
 
-function handleCitySelection(selectedValue) {
-    if (currentStep == 3) {
-        const selectedCity = selectedValue.split(", ")[0];
-        if (!selectedCities.includes(selectedCity)) {
-            selectedCities.push(selectedCity);
-            highlightCityOnMap(selectedCity); // Highlight the city on the map
-            updateDropdownOptions(); // Update dropdowns to exclude the selected city
+function handleCitySelection(selectedValue, dropdownStep) {
+    const selectedCity = selectedValue.split(", ")[0];
+    if (dropdownStep == 3 && !selectedCities.includes(selectedCity)) {
+        selectedCities.push(selectedCity);
+        highlightCityOnMap(selectedCity, 3);
+        updateDropdownOptions();
+        // Disable the dropdown that made the selection
+        event.target.disabled = true;
+    }
+}
+
+function highlightCityOnMap(selectedCity, currentStep) {
+    // Find and highlight the new city marker
+    for (let i = 0; i < sphere.children.length; i++) {
+        const object = sphere.children[i];
+        if (object.userData && object.userData.isCityMarker && object.userData.cityName === selectedCity) {
+            const color = currentStep == 1 ? 0x00ff00 : 0xffa500; // Green for step 1, Orange for step 3
+            object.material.color.set(color);
+            if (currentStep == 3) {
+                selectedCityMarker = object; // Only update selectedCityMarker for step 3
+            }
+            break;
         }
     }
 }
+
 
 
 //EVENT LISTENERS
@@ -434,10 +447,12 @@ renderer.domElement.addEventListener('mousemove', onMouseMove);
 renderer.domElement.addEventListener('mousedown', onClick);
 
 document.getElementById('citySelect').addEventListener('change', (event) => {
-    const selectedCity = event.target.value.split(", ")[0]; // Assuming value is in the format "CityName, Country"
-    highlightCityOnMap(selectedCity);
+    const selectedCity = event.target.value.split(", ")[0];
+    highlightCityOnMap(selectedCity, 1); // Always pass 1 as the step for this dropdown
 
-    startingCityName = selectedCity;
+    if (currentStep == 1) {
+        startingCityName = selectedCity;
+    }
 });
 
 
@@ -445,9 +460,7 @@ document.getElementById('numCities').addEventListener('input', (event) => {
     const numberOfCities = parseInt(event.target.value, 10);
     const cityDropdowns = document.getElementById('cityDropdowns');
 
-    console.log('Number of Cities:', numberOfCities); // Debugging log
-
-    cityDropdowns.innerHTML = '';
+    cityDropdowns.innerHTML = ''; // Clear existing dropdowns
 
     for (let i = 1; i <= numberOfCities; i++) {
         const select = document.createElement('select');
@@ -455,32 +468,103 @@ document.getElementById('numCities').addEventListener('input', (event) => {
         select.innerHTML = `<option value="">${i}. Pick a city</option>`;
 
         cities.forEach(city => {
+            // Check if the city is neither already selected nor the starting city
             if (!selectedCities.includes(city.name) && city.name !== startingCityName) {
                 const option = document.createElement('option');
                 option.value = city.name + ', ' + city.country;
                 option.textContent = city.name + ', ' + city.country;
                 select.appendChild(option);
             }
+        });
 
-            select.addEventListener('change', (e) => {
-                handleCitySelection(e.target.value);
-            });
+        select.addEventListener('change', (e) => {
+            handleCitySelection(e.target.value, 3); // Pass 3 as the step for these dropdowns
         });
 
         cityDropdowns.appendChild(select);
     }
 });
 
+
+function getSelectedCities() {
+    // Extracting the starting city
+    const citySelectElement = document.getElementById('citySelect');
+    const startingCity = citySelectElement.value;
+
+    // Extracting cities to visit
+    const cityDropdowns = document.querySelectorAll("#cityDropdowns select");
+    let citiesToVisit = [];
+
+    cityDropdowns.forEach(dropdown => {
+        if (dropdown.value) {
+            citiesToVisit.push(dropdown.value);
+        }
+    });
+
+    return { startingCity, citiesToVisit };
+}
+
 window.onload = function() {
-    const selectElement = document.getElementById('citySelect');
+    // For 'citySelect'
+    const citySelectElement = document.getElementById('citySelect');
 
     cities.forEach(city => {
-        const option = document.createElement('option');
-        option.value = city.name + ', ' + city.country;
-        option.textContent = city.name + ', ' + city.country;
-        selectElement.appendChild(option);
+        const cityOption = document.createElement('option');
+        cityOption.value = city.name + ', ' + city.country;
+        cityOption.textContent = city.name + ', ' + city.country;
+        citySelectElement.appendChild(cityOption);
+    });
+
+    // For 'algorithmSelect'
+    var algorithms = {
+        'dfs': 'Depth First Search (Brute Force Method)',
+        // Add more algorithms here if needed
+    };
+
+    var algorithmSelectElement = document.getElementById('algorithmSelect');
+
+    for (var key in algorithms) {
+        var algorithmOption = document.createElement('option');
+        algorithmOption.value = key;
+        algorithmOption.textContent = algorithms[key];
+        algorithmSelectElement.appendChild(algorithmOption);
+    }
+
+    document.getElementById("startButton").addEventListener("click", function() {
+        // Retrieve the selected algorithm
+        var selectedAlgorithm = document.getElementById('algorithmSelect').value;
+
+        // Retrieve the starting city and cities to visit
+        let { startingCity, citiesToVisit } = getSelectedCities();
+
+        // Convert city names to city objects (assuming you have lat, lon for each city)
+        // Adjust this part based on how your cities data is structured
+        const cityObjects = cities.map(city => ({
+            name: city.name,
+            lat: city.lat,
+            lon: city.lon
+        }));
+
+        const startingCityObj = cityObjects.find(city => city.name === startingCity);
+        const citiesToVisitObj = citiesToVisit.map(cityName => cityObjects.find(city => city.name === cityName));
+
+        // Check if the starting city and cities to visit are valid
+        if (startingCityObj && citiesToVisitObj.length > 0) {
+            // Execute the selected algorithm
+            if (selectedAlgorithm === 'dfs') {
+                dfs(startingCityObj, citiesToVisitObj).then(([bestCost, bestPath]) => {
+                    console.log("Best Cost:", bestCost);
+                    console.log("Best Path:", bestPath);
+                    // Additional code to handle the result
+                });
+            }
+            // Add more conditions here if you have more algorithms
+        } else {
+            console.error("Invalid city data");
+        }
     });
 };
+
 
 
 document.getElementById("nextButton").addEventListener("click", function() {
@@ -488,10 +572,6 @@ document.getElementById("nextButton").addEventListener("click", function() {
         currentStep++;
         updateStepVisibility();
     }
-});
-
-document.getElementById("startButton").addEventListener("click", function() {
-    // Start the main process here
 });
 
 document.getElementById("resetButton").addEventListener("click", function() {
@@ -533,6 +613,7 @@ function animate() {
     controls.update();
 }
 
+//INITIALIZATION
 createOrbitControls();
 camera.position.z = 10;
 updateStepVisibility();
