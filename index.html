@@ -45,23 +45,22 @@
             </p>
             <div class="form-container my-4 p-4 rounded-lg">
                 <div class="my-4">
-                    <label class="text-white">Click or choose a Starting City:</label>
+                    <label class="text-white">1. Click or choose a Starting City:</label>
                     <select id="citySelect">
                         <option value="">Choose a starting city</option>
                         <!-- Add city options here -->
                     </select>
                 </div>
                 <div class="my-4">
-                    <label class="text-white">Number of Cities:</label>
+                    <label class="text-white">2. Pick the number of cities:</label>
                     <input type="number" id="numCities" min="1" max="200">
                 </div>
-
-                <div class="my-4">
-                    <label class="text-white">Which cities:</label>
-                    <select id="chooseCity">
-                        <option value="">Pick which cities to visit</option>
-                    </select>
-
+                
+                <div id="citiesContainer" class="my-4">
+                    <label class="text-white">3. Pick the order to visit the cities</label>
+                    <div id="cityDropdowns">
+                        <!-- Dynamically inserted dropdowns will go here -->
+                    </div>
                 </div>
 
                 <div class="my-4">
@@ -71,11 +70,18 @@
                     </select>
                 </div>
                 
-                <div class="my-4">
+                <div class="my-4 flex items-center justify-start ...">
                     <button id="startButton" class="px-10 py-3 bg-green-500 text-white font-bold rounded hover:bg-green-600 transition duration-300">
                         START
-                    </button>                
+                    </button>   
+                    <button id="nextButton" class="px-10 py-3 bg-blue-500 text-white font-bold rounded hover:bg-blue-600 transition duration-300">
+                        NEXT
+                    </button>
+                    <button id="resetButton" class="px-10 py-3 bg-purple-500 text-white font-bold rounded hover:bg-blue-600 transition duration-300 ml-8">
+                        RESET
+                    </button>
                 </div>
+                
             </div>
         </div>
         <div class="w-2/3" id="canvasContainer">

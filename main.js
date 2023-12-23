@@ -3,6 +3,7 @@ import { OrbitControls } from 'https://cdn.skypack.dev/three@0.133.1/examples/js
 
 const canvasContainer = document.querySelector('#canvasContainer');
 
+//SHADERS
 const vertexShader = `
     varying vec2 vertexUV;
     varying vec3 vertexNormal;
@@ -30,44 +31,7 @@ const fragmentShader = `
     }
 `;
 
-//scene
-const scene = new THREE.Scene();
-const camera = new THREE.PerspectiveCamera(
-    75,
-    canvasContainer.offsetWidth / canvasContainer.offsetHeight,
-    0.1,
-    1000
-);
-
-//render
-const renderer = new THREE.WebGLRenderer(
-    {
-        antialias: true,
-        canvas: document.querySelector('canvas')
-});
-renderer.setSize(canvasContainer.offsetWidth, canvasContainer.offsetHeight);
-renderer.setPixelRatio(window.devicePixelRatio)
-
-//sphere
-const sphere = new THREE.Mesh(
-    new THREE.SphereGeometry(5, 50, 50),
-    new THREE.ShaderMaterial({
-        vertexShader: vertexShader,
-        fragmentShader: fragmentShader,
-        uniforms: {
-            globeTexture: {
-                value: new THREE.TextureLoader().load('./image/globe.jpeg')
-            }
-        }
-    })
-);
-
-scene.add(sphere);
-
-let controls;
-
-
-//cities
+//LIST OF CITIES
 const cities = [
     // Chicago, USA
     { name: "Chicago", country: "USA", lat: 41.8781, lon: -87.6298 },
@@ -172,70 +136,49 @@ const cities = [
     { name: "Anchorage", country: "USA", lat: 61.2181, lon: -149.9003 }
 ];
 
-window.onload = function() {
-    const selectElement = document.getElementById('citySelect');
+//VARIABLES
+let selectedCityMarker = null; // Store the currently selected city marker
+let hoveredCityMarker = null; // Store the currently hovered city marker
+let selectedCities = [];
+let startingCityName;
+let currentStep = 1;
+let controls;
 
-    cities.forEach(city => {
-        const option = document.createElement('option');
-        option.value = city.name + ', ' + city.country; // or any other format you prefer
-        option.textContent = city.name + ', ' + city.country;
-        selectElement.appendChild(option);
-    });
-};
+//SCENE
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(
+    75,
+    canvasContainer.offsetWidth / canvasContainer.offsetHeight,
+    0.1,
+    1000
+);
 
-function highlightCityOnMap(selectedCity) {
-    // Deselect the previously selected city, if any
-    if (selectedCityMarker) {
-        selectedCityMarker.material.color.set(0xff0000); // Set to default color
-        selectedCityMarker = null;
-    }
-
-    // Find and highlight the new city marker
-    for (let i = 0; i < sphere.children.length; i++) {
-        const object = sphere.children[i];
-        if (object.userData && object.userData.isCityMarker && object.userData.cityName === selectedCity) {
-            object.material.color.set(0x00ff00); // Highlight color
-            selectedCityMarker = object;
-            break;
-        }
-    }
-}
-
-function latLongToVector3(lat, lon, radius) {
-    var phi = (90 - lat) * (Math.PI / 180);
-    var theta = (lon + 180) * (Math.PI / 180);
-
-    var x = -(radius * Math.sin(phi) * Math.cos(theta));
-    var y = radius * Math.cos(phi);
-    var z = radius * Math.sin(phi) * Math.sin(theta);
-
-    return new THREE.Vector3(x, y, z);
-}
-
-const globeRadius = 5; // Same as your sphere's radius
-const citySize = 0.05; // Adjust the size of the city marker
-
-cities.forEach(city => {
-    const position = latLongToVector3(city.lat, city.lon, globeRadius);
-
-    const cityGeometry = new THREE.SphereGeometry(citySize, 32, 32);
-    const cityMaterial = new THREE.MeshBasicMaterial({ color: 0xff0000 });
-    const cityMarker = new THREE.Mesh(cityGeometry, cityMaterial);
-
-    cityMarker.position.set(position.x, position.y, position.z);
-    sphere.add(cityMarker); // Add city marker as a child of the globe
-
-    cityMarker.userData = {
-        isCityMarker: true,
-        cityName: city.name,
-        country: city.country
-    };
-
-    cityMarker.userData.isCityMarker = true;
+//RENDER
+const renderer = new THREE.WebGLRenderer(
+    {
+        antialias: true,
+        canvas: document.querySelector('canvas')
 });
+renderer.setSize(canvasContainer.offsetWidth, canvasContainer.offsetHeight);
+renderer.setPixelRatio(window.devicePixelRatio)
 
+//SPHERE
+const sphere = new THREE.Mesh(
+    new THREE.SphereGeometry(5, 50, 50),
+    new THREE.ShaderMaterial({
+        vertexShader: vertexShader,
+        fragmentShader: fragmentShader,
+        uniforms: {
+            globeTexture: {
+                value: new THREE.TextureLoader().load('./image/globe.jpeg')
+            }
+        }
+    })
+);
 
-//orbit controls
+scene.add(sphere);
+
+//ORBIT CONTROLS
 function createOrbitControls() {
     controls = new OrbitControls(camera, renderer.domElement);
     controls.enablePan = false;
@@ -246,11 +189,7 @@ function createOrbitControls() {
     controls.maxPolarAngle = Math.PI;
 }
 
-createOrbitControls();
-
-camera.position.z = 10;
-
-//star
+//STARS
 const starGeometry = new THREE.BufferGeometry()
 const starMaterial = new THREE.PointsMaterial({
     color: 0xffffff,
@@ -274,9 +213,43 @@ scene.add(stars);
 const raycaster = new THREE.Raycaster();
 const mouse = new THREE.Vector2();
 
-let selectedCityMarker = null; // Store the currently selected city marker
-let hoveredCityMarker = null; // Store the currently hovered city marker
 
+//CREATION OF CITY MARKERS
+const globeRadius = 5; // Same as your sphere's radius
+const citySize = 0.05; // Adjust the size of the city marker
+
+cities.forEach(city => {
+    const position = latLongToVector3(city.lat, city.lon, globeRadius);
+
+    const cityGeometry = new THREE.SphereGeometry(citySize, 32, 32);
+    const cityMaterial = new THREE.MeshBasicMaterial({ color: 0xff0000 });
+    const cityMarker = new THREE.Mesh(cityGeometry, cityMaterial);
+
+    cityMarker.position.set(position.x, position.y, position.z);
+    sphere.add(cityMarker); // Add city marker as a child of the globe
+
+    cityMarker.userData = {
+        isCityMarker: true,
+        cityName: city.name,
+        country: city.country
+    };
+
+    cityMarker.userData.isCityMarker = true;
+});
+
+function latLongToVector3(lat, lon, radius) {
+    var phi = (90 - lat) * (Math.PI / 180);
+    var theta = (lon + 180) * (Math.PI / 180);
+
+    var x = -(radius * Math.sin(phi) * Math.cos(theta));
+    var y = radius * Math.cos(phi);
+    var z = radius * Math.sin(phi) * Math.sin(theta);
+
+    return new THREE.Vector3(x, y, z);
+}
+
+
+//NAVBAR INTERACTIONS/GLOBE HANDLING
 function onMouseMove(event) {
     const bounds = renderer.domElement.getBoundingClientRect();
     mouse.x = ((event.clientX - bounds.left) / bounds.width) * 2 - 1;
@@ -306,42 +279,248 @@ function onMouseMove(event) {
     }
 }
 
+
 function onClick(event) {
-    raycaster.setFromCamera(mouse, camera);
-    const intersects = raycaster.intersectObjects(scene.children, true);
+    if (currentStep == 1) {
+    
+        raycaster.setFromCamera(mouse, camera);
+        const intersects = raycaster.intersectObjects(scene.children, true);
 
-    if (intersects.length > 0 && intersects[0].object.userData && intersects[0].object.userData.isCityMarker) {
-        const cityMarker = intersects[0].object;
+        if (intersects.length > 0 && intersects[0].object.userData && intersects[0].object.userData.isCityMarker) {
+            const cityMarker = intersects[0].object;
 
-        if (selectedCityMarker === cityMarker) {
-            selectedCityMarker.material.color.set(0xff0000); // Red color
-            selectedCityMarker = null;
-            document.getElementById('citySelect').value = ''; // Reset select element
-        } else {
-            if (selectedCityMarker) {
+            if (selectedCityMarker === cityMarker) {
                 selectedCityMarker.material.color.set(0xff0000); // Red color
-            }
+                selectedCityMarker = null;
+                document.getElementById('citySelect').value = ''; // Reset select element
+            } else {
+                if (selectedCityMarker) {
+                    selectedCityMarker.material.color.set(0xff0000); // Red color
+                }
 
-            selectedCityMarker = cityMarker;
-            selectedCityMarker.material.color.set(0x00ff00); // Green color for selected city
+                selectedCityMarker = cityMarker;
+                selectedCityMarker.material.color.set(0x00ff00); // Green color for selected city
 
-            // Construct the city name and country string
-            const cityInfo = `${selectedCityMarker.userData.cityName}, ${selectedCityMarker.userData.country}`;
+                // Construct the city name and country string
+                const cityInfo = `${selectedCityMarker.userData.cityName}, ${selectedCityMarker.userData.country}`;
 
-            // Find the option in the select element that matches the cityInfo and select it
-            const selectElement = document.getElementById('citySelect');
-            for (let i = 0; i < selectElement.options.length; i++) {
-                if (selectElement.options[i].text === cityInfo) {
-                    selectElement.selectedIndex = i;
-                    break;
+                // Find the option in the select element that matches the cityInfo and select it
+                const selectElement = document.getElementById('citySelect');
+                for (let i = 0; i < selectElement.options.length; i++) {
+                    if (selectElement.options[i].text === cityInfo) {
+                        selectElement.selectedIndex = i;
+                        break;
+                    }
                 }
             }
+        }
+    } else if (currentStep == 3) {
+        raycaster.setFromCamera(mouse, camera);
+        const intersects = raycaster.intersectObjects(scene.children, true);
+    
+        if (intersects.length > 0 && intersects[0].object.userData && intersects[0].object.userData.isCityMarker) {
+            const cityMarker = intersects[0].object;
+    
+            if (!selectedCities.includes(cityMarker.userData.cityName)) {
+                const dropdowns = document.querySelectorAll("#cityDropdowns select");
+                const currentDropdown = Array.from(dropdowns).find(dropdown => dropdown.value === '');
+    
+                if (currentDropdown) {
+                    const cityInfo = `${cityMarker.userData.cityName}, ${cityMarker.userData.country}`;
+    
+                    currentDropdown.value = cityInfo;
+                    selectedCityMarker = cityMarker;
+                    selectedCityMarker.material.color.set(0xffa500); // Set color to orange
+        
+                    cityMarker.userData.isSelected = true;
+                    selectedCities.push(cityMarker.userData.cityName);
+    
+                    currentDropdown.disabled = true; // Disable the dropdown
+                    updateDropdownOptions(); // Update options in future dropdowns
+                }
+            }
+        }
+    }
+    return; 
+}
+
+function highlightCityOnMap(selectedCity) {
+    // Deselect the previously selected city, if any
+    if (selectedCityMarker) {
+        selectedCityMarker.material.color.set(0xff0000); // Set to default color
+        selectedCityMarker = null;
+    }
+
+    // Find and highlight the new city marker
+    for (let i = 0; i < sphere.children.length; i++) {
+        const object = sphere.children[i];
+        if (object.userData && object.userData.isCityMarker && object.userData.cityName === selectedCity) {
+            object.material.color.set(0x00ff00); // Highlight color
+            selectedCityMarker = object;
+            break;
+        }
+    }
+}
+
+function updateDropdownOptions() {
+    const dropdowns = document.querySelectorAll("#cityDropdowns select");
+
+    dropdowns.forEach(dropdown => {
+        const currentValue = dropdown.value;
+        dropdown.innerHTML = '<option value="">Pick a city</option>'; // Reset options
+
+        cities.forEach(city => {
+            if (!selectedCities.includes(city.name) || city.name + ', ' + city.country === currentValue) {
+                const option = document.createElement('option');
+                option.value = city.name + ', ' + city.country;
+                option.textContent = city.name + ', ' + city.country;
+                dropdown.appendChild(option);
+            }
+        });
+
+        dropdown.value = currentValue; // Restore the selected value
+    });
+}
+
+function updateStepVisibility() {
+    // Define all the step elements
+    const citySelect = document.getElementById("citySelect");
+    const numCities = document.getElementById("numCities");
+    const cityDropdowns = document.getElementById("cityDropdowns");
+    const algorithmSelect = document.getElementById("algorithmSelect");
+    const nextButton = document.getElementById("nextButton");
+    const startButton = document.getElementById("startButton");
+
+    // Adjust button visibility
+    nextButton.style.display = (currentStep < 4) ? 'block' : 'none';
+    startButton.style.display = (currentStep >= 4) ? 'block' : 'none';
+
+    // Show and manage the current step
+    switch (currentStep) {
+        case 1:
+            citySelect.style.display = 'block';
+            citySelect.disabled = false;
+            break;
+        case 2:
+            citySelect.disabled = true;
+            numCities.style.display = 'block';
+            numCities.disabled = false;
+            break;
+        case 3:
+            numCities.disabled = true;
+            cityDropdowns.style.display = 'block';
+            break;
+        case 4:
+            cityDropdowns.disabled = true;
+            algorithmSelect.style.display = 'block';
+            break;
+    }
+}
+
+function handleCitySelection(selectedValue) {
+    if (currentStep == 3) {
+        const selectedCity = selectedValue.split(", ")[0];
+        if (!selectedCities.includes(selectedCity)) {
+            selectedCities.push(selectedCity);
+            highlightCityOnMap(selectedCity); // Highlight the city on the map
+            updateDropdownOptions(); // Update dropdowns to exclude the selected city
         }
     }
 }
 
 
+//EVENT LISTENERS
+renderer.domElement.addEventListener('mousemove', onMouseMove);
+renderer.domElement.addEventListener('mousedown', onClick);
 
+document.getElementById('citySelect').addEventListener('change', (event) => {
+    const selectedCity = event.target.value.split(", ")[0]; // Assuming value is in the format "CityName, Country"
+    highlightCityOnMap(selectedCity);
+
+    startingCityName = selectedCity;
+});
+
+
+document.getElementById('numCities').addEventListener('input', (event) => {
+    const numberOfCities = parseInt(event.target.value, 10);
+    const cityDropdowns = document.getElementById('cityDropdowns');
+
+    console.log('Number of Cities:', numberOfCities); // Debugging log
+
+    cityDropdowns.innerHTML = '';
+
+    for (let i = 1; i <= numberOfCities; i++) {
+        const select = document.createElement('select');
+        select.id = 'citySelect' + i;
+        select.innerHTML = `<option value="">${i}. Pick a city</option>`;
+
+        cities.forEach(city => {
+            if (!selectedCities.includes(city.name) && city.name !== startingCityName) {
+                const option = document.createElement('option');
+                option.value = city.name + ', ' + city.country;
+                option.textContent = city.name + ', ' + city.country;
+                select.appendChild(option);
+            }
+
+            select.addEventListener('change', (e) => {
+                handleCitySelection(e.target.value);
+            });
+        });
+
+        cityDropdowns.appendChild(select);
+    }
+});
+
+window.onload = function() {
+    const selectElement = document.getElementById('citySelect');
+
+    cities.forEach(city => {
+        const option = document.createElement('option');
+        option.value = city.name + ', ' + city.country;
+        option.textContent = city.name + ', ' + city.country;
+        selectElement.appendChild(option);
+    });
+};
+
+
+document.getElementById("nextButton").addEventListener("click", function() {
+    if (currentStep < 4) {
+        currentStep++;
+        updateStepVisibility();
+    }
+});
+
+document.getElementById("startButton").addEventListener("click", function() {
+    // Start the main process here
+});
+
+document.getElementById("resetButton").addEventListener("click", function() {
+    currentStep = 1;
+
+    // Reset the starting city
+    document.getElementById("citySelect").value = '';
+    startingCityName = null;
+
+    // Reset the number of cities input and re-enable it
+    const numCitiesInput = document.getElementById("numCities");
+    numCitiesInput.value = '';
+    numCitiesInput.disabled = false; // Re-enable the input
+
+    // Clear the city dropdowns
+    document.getElementById("cityDropdowns").innerHTML = '';
+
+    // Reset selected cities and markers
+    selectedCities = [];
+    sphere.children.forEach(child => {
+        if (child.userData && child.userData.isCityMarker) {
+            child.material.color.set(0xff0000); // Reset marker color
+        }
+    });
+
+    updateStepVisibility();
+});
+
+//ANIMATE
 sphere.rotation.x = THREE.MathUtils.degToRad(23.5);
 
 function animate() {
@@ -354,14 +533,7 @@ function animate() {
     controls.update();
 }
 
-// Add event listeners
-renderer.domElement.addEventListener('mousemove', onMouseMove);
-renderer.domElement.addEventListener('mousedown', onClick);
-
-document.getElementById('citySelect').addEventListener('change', (event) => {
-    const selectedCity = event.target.value.split(", ")[0]; // Assuming value is in the format "CityName, Country"
-    highlightCityOnMap(selectedCity);
-});
-
-
+createOrbitControls();
+camera.position.z = 10;
+updateStepVisibility();
 animate()
